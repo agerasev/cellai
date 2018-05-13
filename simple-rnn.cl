@@ -17,9 +17,13 @@ typedef struct {
 } Agent;
 
 Agent agent_load(
-    __global const int   *agent_i, 
-    __global const float *agent_f
+    __constant int *PAR_I,
+    int index,
+    __global const int   *a_agents_i, 
+    __global const float *a_agents_f
 ) {
+    __global const int   *agent_i = a_agents_i + PAR_I[I_AGENT_SIZE_I]*index;
+    __global const float *agent_f = a_agents_f + PAR_I[I_AGENT_SIZE_F]*index;
     Agent a;
     a.pos = (int2)(agent_i[0], agent_i[1]);
     a.score = agent_i[2];
@@ -28,9 +32,13 @@ Agent agent_load(
 
 Agent agent_store(
     Agent a,
-    __global int   *agent_i, 
-    __global float *agent_f
+    __constant int *PAR_I,
+    int index,
+    __global int   *a_agents_i, 
+    __global float *a_agents_f
 ) {
+    __global int   *agent_i = a_agents_i + PAR_I[I_AGENT_SIZE_I]*index;
+    __global float *agent_f = a_agents_f + PAR_I[I_AGENT_SIZE_F]*index;
     agent_i[0] = a.pos.x;
     agent_i[1] = a.pos.y;
     agent_i[2] = a.score;
@@ -115,19 +123,19 @@ __kernel void a_step(
     int2 ws = (int2)(PAR_I[I_WORLD_SIZE_X], PAR_I[I_WORLD_SIZE_Y]);
     __global int *agent_i = a_agents_i + gi*PAR_I[I_AGENT_SIZE_I];
 
-    int2 pos = vload2(0, agent_i);
+    Agent agent = agent_load(PAR_I, gi, a_agents_i, a_agents_f);
     int d = rand_int(&(a_random[gi])) % 5;
-    pos += (d != 0)*(int2)((d%2)*(2-d), ((d+1)%2)*(3-d));
-    pos = clamp(pos, (int2)(0, 0), ws - (int2)(1,1));
-    vstore2(pos, 0, agent_i);
+    agent.pos += (d != 0)*(int2)((d%2)*(2-d), ((d+1)%2)*(3-d));
+    agent.pos = clamp(agent.pos, (int2)(0, 0), ws - (int2)(1,1));
+    agent_store(agent, PAR_I, gi, a_agents_i, a_agents_f);
 
-    uint p = (pos.x + ws.x*pos.y);
+    uint p = (agent.pos.x + ws.x*agent.pos.y);
     w_trace__dst[p] = 1.0;
 }
 
 
 __kernel void w_draw(
-    __constant int *PAR_I,
+    __constant int   *PAR_I,
     __constant float *PAR_F,
     
     __global const float *w_trace,
@@ -143,7 +151,7 @@ __kernel void w_draw(
 
 
 __kernel void a_draw(
-    __constant int *PAR_I,
+    __constant int   *PAR_I,
     __constant float *PAR_F,
 
     __global const int *a_agents_i,
@@ -156,8 +164,8 @@ __kernel void a_draw(
     int2 ws = (int2)(PAR_I[I_WORLD_SIZE_X], PAR_I[I_WORLD_SIZE_Y]);
     const __global int *agent_i = a_agents_i + gi*PAR_I[I_AGENT_SIZE_I];
 
-    int2 pos = vload2(0, agent_i);
-    int p = (pos.x + ws.x*pos.y);
+    Agent agent = agent_load(PAR_I, gi, a_agents_i, a_agents_f);
+    int p = (agent.pos.x + ws.x*agent.pos.y);
     uchar c = 255;
     uchar3 col = (uchar3)(c, c, c);
     vstore3(col, p, w_screen);
