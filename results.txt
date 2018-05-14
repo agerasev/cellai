@@ -1,0 +1,14 @@
+Test results:
+
+GTX 970 4GB
+
+[ Chaotic ]
+    world_size: (800, 600),
+    n_agents: 256,
+    world_period: 10
+        ~ 4.4k steps per seconds
+
+    world_size: (4000, 4000),
+    n_agents: 8192,
+    world_period: 100
+        ~ 5k steps per second

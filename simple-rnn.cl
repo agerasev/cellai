@@ -4,10 +4,13 @@
 #define I_WORLD_SIZE_Y          1
 #define I_AGENT_SIZE_I          2
 #define I_AGENT_SIZE_F          3
+#define I_W_CACHE_SIZE_I        4
+#define I_W_CACHE_SIZE_F        5
+#define I_W_TRACE_SIZE_F        6
 
-#define F_TR_FADE_FAC           0
-#define F_TR_DIFF_FAC           1
-
+#define F_TRACE_FADE_FAC        0
+#define F_TRACE_DIFF_FAC        1
+#define F_TRACE_APPEAR_FAC      2
 
 // Structures
 
@@ -30,7 +33,7 @@ Agent agent_load(
     return a;
 }
 
-Agent agent_store(
+void agent_store(
     Agent a,
     __constant int *PAR_I,
     int index,
@@ -70,39 +73,60 @@ int fpos(int2 pos, int2 size) {
 
 // Kernels
 
-__kernel void w_step(
+__kernel void w_step_read(
     __constant int   *PAR_I,
     __constant float *PAR_F,
     
     __global uint *w_random,
     
-    __global const float *w_trace__src,
-    __global       float *w_trace__dst
+    __global int   *w_cache_i,
+    __global float *w_cache_f,
+    
+    __global const float *w_trace_f
 ) {
     int2 gi = (int2)(get_global_id(0), get_global_id(1));
     int2 gs = (int2)(get_global_size(0), get_global_size(1));
-    float v = w_trace__src[fpos(gi, gs)];
     
     // diffusion
-    float dv = 0.0;
+    float3 v = vload3(0, w_trace_f + fpos(gi, gs)*PAR_I[I_W_TRACE_SIZE_F]);
+    float3 dv = 0.0;
     int np[4];
     int i;
     for (i = 0; i < 4; ++i) {
         int2 ni = gi + idir(i);
-        float nv;
+        float3 nv;
         if (is_inside(ni, (int2)(0,0), gs)) {
-            nv = w_trace__src[fpos(ni, gs)];
+            nv = vload3(0, w_trace_f + fpos(ni, gs)*PAR_I[I_W_TRACE_SIZE_F]);
         } else {
             nv = v;
         }
-        dv += PAR_F[F_TR_DIFF_FAC]*(nv - v);
+        dv += PAR_F[F_TRACE_DIFF_FAC]*(nv - v);
     }
-    v += dv;
+    vstore3(dv, 0, w_cache_f + fpos(gi, gs)*PAR_I[I_W_CACHE_SIZE_F]);
+}
+
+__kernel void w_step_write(
+    __constant int   *PAR_I,
+    __constant float *PAR_F,
+    
+    __global uint *w_random,
+    
+    __global int   *w_cache_i,
+    __global float *w_cache_f,
+    
+    __global float *w_trace_f
+) {
+    int2 gi = (int2)(get_global_id(0), get_global_id(1));
+    int2 gs = (int2)(get_global_size(0), get_global_size(1));
+    
+    int fp = fpos(gi, gs);
     
     // fade
-    v *= 1.0 - PAR_F[F_TR_FADE_FAC];
-    
-    w_trace__dst[fpos(gi, gs)] = v;
+    float3 v = vload3(0, w_trace_f + fp*PAR_I[I_W_TRACE_SIZE_F]);
+    float3 dv = vload3(0, w_cache_f + fp*PAR_I[I_W_CACHE_SIZE_F]);
+    v += dv;
+    v *= 1.0f - PAR_F[F_TRACE_FADE_FAC];
+    vstore3(v, 0, w_trace_f + fp*PAR_I[I_W_TRACE_SIZE_F]);
 }
 
 
@@ -115,8 +139,7 @@ __kernel void a_step(
     __global int   *a_agents_i,
     __global float *a_agents_f,
     
-    __global const float *w_trace__src,
-    __global       float *w_trace__dst
+    __global float *w_trace_f
 ) {
     int gi = get_global_id(0);
     int gs = get_global_size(0);
@@ -129,8 +152,10 @@ __kernel void a_step(
     agent.pos = clamp(agent.pos, (int2)(0, 0), ws - (int2)(1,1));
     agent_store(agent, PAR_I, gi, a_agents_i, a_agents_f);
 
-    uint p = (agent.pos.x + ws.x*agent.pos.y);
-    w_trace__dst[p] = 1.0;
+    int fp = (agent.pos.x + ws.x*agent.pos.y);
+    float3 v = vload3(0, w_trace_f + fp*PAR_I[I_W_TRACE_SIZE_F]);
+    v.y = 1.0f - (1.0f - PAR_F[F_TRACE_APPEAR_FAC])*(1.0f - v.y);
+    vstore3(v, 0, w_trace_f + fp*PAR_I[I_W_TRACE_SIZE_F]);
 }
 
 
@@ -138,15 +163,14 @@ __kernel void w_draw(
     __constant int   *PAR_I,
     __constant float *PAR_F,
     
-    __global const float *w_trace,
+    __global const float *w_trace_f,
     __global uchar *w_screen
 ) {
     int2 gi = (int2)(get_global_id(0), get_global_id(1));
     int2 gs = (int2)(get_global_size(0), get_global_size(1));
-    int p = (gi.x + gs.x*gi.y);
-    uchar c = (uchar)(255*w_trace[p]);
-    uchar3 col = (uchar3)(c, c, 0);
-    vstore3(col, p, w_screen);
+    int fp = (gi.x + gs.x*gi.y);
+    uchar3 col = convert_uchar3(255.0f*vload3(0, w_trace_f + fp*PAR_I[I_W_TRACE_SIZE_F]));
+    vstore3(col, fp, w_screen);
 }
 
 
