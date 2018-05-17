@@ -40,6 +40,7 @@
 
 typedef struct {
     int2 pos;
+    int dir;
     int score;
     int last_score;
     float var_exp;
@@ -55,8 +56,9 @@ Agent agent_load(
     __global float *agent_f = a_agent_f + index*SIZE_A_AGENT_F;
     Agent a;
     a.pos = (int2)(agent_i[0], agent_i[1]);
-    a.score = agent_i[2];
-    a.last_score = agent_i[3];
+    a.dir = agent_i[2];
+    a.score = agent_i[3];
+    a.last_score = agent_i[4];
     a.var_exp = agent_f[0];
     a.memory = agent_f + 1;
     return a;
@@ -72,8 +74,9 @@ void agent_store(
     __global float *agent_f = a_agent_f + index*SIZE_A_AGENT_F;
     agent_i[0] = a.pos.x;
     agent_i[1] = a.pos.y;
-    agent_i[2] = a.score;
-    agent_i[3] = a.last_score;
+    agent_i[2] = a.dir;
+    agent_i[3] = a.score;
+    agent_i[4] = a.last_score;
     agent_f[0] = a.var_exp;
 }
 
@@ -256,12 +259,25 @@ __kernel void a_step(
     RNN rnn = rnn_reference(ai, a_rnn_f);
     float3 v = vload3(0, w_trace_f + fpos(agent.pos, ws)*SIZE_W_TRACE_F);
     
+    // trace
+    v.x = 1.0f - (1.0f - P_f[F_TRACE_ANIMAL_FAC])*(1.0f - v.x);
+    vstore3(v, 0, w_trace_f + fpos(agent.pos, ws)*SIZE_W_TRACE_F);
+    
+    // eat
+    bool eat = false;
+    __global int *objptr = w_object_i + fpos(agent.pos, ws)*SIZE_W_OBJECT_I;
+    if (atomic_cmpxchg(objptr, OBJECT_PLANT, OBJECT_NONE) == OBJECT_PLANT) {
+        agent.score += 1;
+        eat = true;
+    }
+    
     // RNN evaluation
     int i;
     float x[RNN_SIZE_X];
     float y[RNN_SIZE_Y];
-    x[0] = v.y;
-    x[5] = v.x;
+    x[0] = v.x;
+    x[5] = v.y;
+    x[10] = (float)eat;
     for (i = 0; i < 4; ++i) {
         int2 ni = agent.pos + P_i[I_ANIMAL_SENS_LEN]*idir(i);
         float3 nv;
@@ -270,8 +286,10 @@ __kernel void a_step(
         } else {
             nv = v;
         }
-        x[i+1] = v.y;
-        x[i+6] = v.x;
+        x[1+i] = nv.x;
+        x[6+i] = nv.y;
+        //x[1+((i+agent.dir) % 4)] = nv.x;
+        //x[6+((i+agent.dir) % 4)] = nv.y;
     }
     rnn_step(rnn, x, agent.memory, y);
     
@@ -298,20 +316,19 @@ __kernel void a_step(
         }
     }
     
-    // trace
-    v.x = 1.0f - (1.0f - P_f[F_TRACE_ANIMAL_FAC])*(1.0f - v.x);
-    vstore3(v, 0, w_trace_f + fpos(agent.pos, ws)*SIZE_W_TRACE_F);
-    
-    // eat
-    __global int *objptr = w_object_i + fpos(agent.pos, ws)*SIZE_W_OBJECT_I;
-    if (atomic_cmpxchg(objptr, OBJECT_PLANT, OBJECT_NONE) == OBJECT_PLANT) {
-        agent.score += 1;
-    }
-    
     // move
     agent.pos += (d != 0)*(int2)((d%2)*(2-d), ((d+1)%2)*(3-d));
     agent.pos = clamp(agent.pos, (int2)(0, 0), ws - (int2)(1,1));
-    
+    /*
+    if (d == 1) {
+        agent.pos += idir(agent.dir);
+        agent.pos = clamp(agent.pos, (int2)(0, 0), ws - (int2)(1,1));
+    } else if (d == 2) {
+        agent.dir = (agent.dir + 3) % 4;
+    } else if (d == 3) {
+        agent.dir = (agent.dir + 3) % 4;
+    }
+    */
     agent_store(agent, ai, a_agent_i, a_agent_f);
 }
 
@@ -386,7 +403,11 @@ __kernel void a_select(
         }
         
         agent.var_exp = sel_agent.var_exp + var*(rand_uniform(a_random + ai) - 0.5);
-        agent.pos = sel_agent.pos;
+        //agent.pos = sel_agent.pos;
+        //agent.dir = sel_agent.dir;
+        
+        agent.pos = (int2)(rand_int(a_random + ai) % ws.x, rand_int(a_random + ai) % ws.y);
+        agent.dir = rand_int(a_random + ai) % 4;
     }
     
     agent.last_score = agent.score;
