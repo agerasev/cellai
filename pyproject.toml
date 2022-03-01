@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "cellai"
+version = "0.2.0"
+description = "Cell AI experiments"
+authors = ["Alexey Gerasev <a.v.gerasyov@inp.nsk.su>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+numpy = "^1.22.2"
+pyopencl = "^2022.1"
+Pillow = "^9.0.1"
+sk-video = "^1.1.10"
+
+[tool.poetry.dev-dependencies]
+toml = "^0.10.2"
+yapf = "^0.32.0"
+mypy = "^0.931"
+ipykernel = "^6.9.1"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.yapf]
+based_on_style = "yapf"
+column_limit = 128
+indent_width = 4
+continuation_indent_width = 4
+spaces_before_comment = 1
+
+[tool.mypy]
+strict = true
